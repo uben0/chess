@@ -315,7 +315,19 @@ impl PosIter {
     fn new(x: usize, y: usize) -> PosIter {
         PosIter {x, y, dx: 0, dy: 0}
     }
-    fn axes(self: PosIter) -> [PosIter; 4] {
+	fn north(self: &PosIter) -> PosIter {
+		PosIter{ dy: self.dy - 1, .. *self}
+	}
+	fn south(self: &PosIter) -> PosIter {
+		PosIter{ dy: self.dy + 1, .. *self}
+	}
+	fn west(self: &PosIter) -> PosIter {
+		PosIter{ dx: self.dx - 1, .. *self}
+	}
+	fn est(self: &PosIter) -> PosIter {
+		PosIter{ dx: self.dx + 1, .. *self}
+	}
+	fn axes(self: &PosIter) -> [PosIter; 4] {
         [
             self.north(),
             self.est(),
@@ -323,38 +335,22 @@ impl PosIter {
             self.west(),
         ]
     }
-    fn diagonals(self: PosIter) -> [PosIter; 4] {
+    fn diagonals(self: &PosIter) -> [PosIter; 4] {
         [
             self.north().est(),
             self.est().south(),
             self.south().west(),
             self.west().north(),
         ]
-    }
-    fn radials(self: PosIter) -> [PosIter; 4] {
+	}
+    fn radials(self: &PosIter) -> [PosIter; 4] {
         assert!(self.dx != 0 || self.dy != 0);
         [
-            PosIter{x: self.x, y: self.y, dx:  self.dx, dy:  self.dy},
-            PosIter{x: self.x, y: self.y, dx: -self.dy, dy:  self.dx},
-            PosIter{x: self.x, y: self.y, dx: -self.dx, dy: -self.dy},
-            PosIter{x: self.x, y: self.y, dx:  self.dy, dy: -self.dx},
+            PosIter{dx:  self.dx, dy:  self.dy, .. *self},
+            PosIter{dx: -self.dy, dy:  self.dx, .. *self},
+            PosIter{dx: -self.dx, dy: -self.dy, .. *self},
+            PosIter{dx:  self.dy, dy: -self.dx, .. *self},
         ]
-    }
-    fn north(mut self: PosIter) -> PosIter {
-        self.dy -= 1;
-        self
-    }
-    fn south(mut self: PosIter) -> PosIter {
-        self.dy += 1;
-        self
-    }
-    fn west(mut self: PosIter) -> PosIter {
-        self.dx -= 1;
-        self
-    }
-    fn est(mut self: PosIter) -> PosIter {
-        self.dx += 1;
-        self
     }
 }
 impl Iterator for PosIter {
