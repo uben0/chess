@@ -23,11 +23,6 @@ enum Color {
     White,
 }
 use Color::*;
-impl Color {
-    fn oponent(self: Color) -> Color {
-        match self {White=>Black, Black=>White}
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Piece {
@@ -35,7 +30,7 @@ struct Piece {
     c: Color,
 }
 impl Piece {
-    fn to_unicode(self: Piece) -> char {
+    fn to_unicode(self) -> char {
         match (self.c, self.t) {
             (Black, King  ) => '♚',
             (Black, Queen ) => '♛',
@@ -59,8 +54,8 @@ struct Game {
 }
 
 impl Game {
-    fn new() -> Game {
-        let mut g = Game {
+    fn new() -> Self {
+        let mut g = Self {
             board: [[None; 8]; 8],
         };
 
@@ -75,88 +70,56 @@ impl Game {
 
         return g;
     }
-    fn print_with_reachable(self: &Game, map: &[[bool; 8]; 8]) {
+    fn print(&self) {
         println!("  a b c d e f g h");
         for y in 0..8 {
             print!("{} ", y + 1);
             for x in 0..8 {
-                if (x + y) % 2 != 0 {
-                    print!("\x1b[100m");
-                }
                 match self.board[y][x] {
                     Some(piece) => {
-                        if map[y][x] {
-                            print!("\x1b[92m{}\x1b[39m ", piece.to_unicode());
-                        }
-                        else {
-                            print!("{} ", piece.to_unicode());
-                        }
+                        print!("{} ", piece.to_unicode());
                     }
                     None => {
-                        if map[y][x] {
-                            print!("\x1b[96m╶╴\x1b[39m");
-                        }
-                        else {
-                            print!("  ");
-                        }
+                        print!("  ");
                     }
                 }
-                if (x + y) % 2 != 0 {
-                    print!("\x1b[49m");
-                }
             }
-            println!("");
+            println!(" {}", y + 1);
         }
+        println!("  a b c d e f g h");
     }
-    // fn print(self: &Game) {
-    //     println!("  a b c d e f g h");
-    //     for y in 0..8 {
-    //         print!("{} ", y + 1);
-    //         for x in 0..8 {
-    //             match self.board[y][x] {
-    //                 Some(piece) => {
-    //                     print!("{} ", piece.to_unicode());
-    //                 }
-    //                 None => {
-    //                     print!("  ");
-    //                 }
-    //             }
-    //         }
-    //         println!("");
-    //     }
-    // }
-    fn pieces_iter(self: &Game) -> BoardIter {
-        BoardIter{
-            board: &self.board,
-            x: 0,
-            y: 0,
-            alive: true,
-        }
-    }
-    fn reachable_by_piece(self: &Game, x: usize, y: usize, map: &mut [[bool; 8]; 8]) {
-        fn line<T>(g: &Game, player: Color, map: &mut [[bool; 8]; 8], pos_iter: T)
-        where T: Iterator<Item=(usize, usize)>
-        {
-            for (x, y) in pos_iter {
-                if let Some(p) = g.board[y][x] {
-                    if p.c != player {
-                        map[y][x] = true;
-                    }
-                    break
-                }
-                else {
-                    map[y][x] = true;
-                }
-            }
-        }
-        if let Some(p) = self.board[y][x] {
-            let pos_iter = PosIter::new(x, y);
-            match p.t {
-                Pawn => {
-                    let (pos_iter, start) = match p.c {
-                        Black => {(pos_iter.south(), 1)}
-                        White => {(pos_iter.north(), 6)}
-                    };
+	fn reachable_by_pos_iter<
+		T: Iterator< Item=(usize, usize) >
+	>(
+		&self,
+		pos_iter: T,
+		player  : Color,
+		map     : &mut [[bool; 8]; 8]
+	) {
+		for (x, y) in pos_iter {
+			if let Some(p) = self.board[y][x] {
+				if p.c != player {
+					map[y][x] = true;
+				}
+				break
+			}
+			else {
+				map[y][x] = true;
+			}
+		}
+	}
+	fn reachable_by_piece(
+		&self,
+		x: usize, y: usize,
+		map: &mut [[bool; 8]; 8]
+	) {
+		if let Some(piece) = self.board[y][x] {
+			match piece.t {
+				Pawn => {
+					let (pos_iter, start) = match piece.c {
+						Black => {(PosIter::new(x, y).south(), 1)}
+						White => {(PosIter::new(x, y).north(), 6)}
+					};
                     for (x, y) in pos_iter.take(1 + (y == start) as usize) {
                         if self.board[y][x].is_some() {
                             break;
@@ -165,82 +128,76 @@ impl Game {
                     }
                     if let Some((x, y)) = pos_iter.est().next() {
                         if let Some(dst_piece) = self.board[y][x] {
-                            if dst_piece.c != p.c {
+                            if dst_piece.c != piece.c {
                                 map[y][x] = true;
                             }
                         }
                     }
                     if let Some((x, y)) = pos_iter.west().next() {
                         if let Some(dst_piece) = self.board[y][x] {
-                            if dst_piece.c != p.c {
+                            if dst_piece.c != piece.c {
                                 map[y][x] = true;
                             }
                         }
                     }
-                }
-                King => {
-                    for pos_iter in &pos_iter.axes() {
-                        line(self, p.c, map, pos_iter.take(1));
+				}
+				Knight => {
+					for pos_iter in &PosIter::new(x, y).north().north().est().radials() {
+						self.reachable_by_pos_iter(pos_iter.take(1), piece.c, map)
                     }
-                    for pos_iter in &pos_iter.diagonals() {
-                        line(self, p.c, map, pos_iter.take(1));
+                    for pos_iter in &PosIter::new(x, y).north().north().west().radials() {
+						self.reachable_by_pos_iter(pos_iter.take(1), piece.c, map)
                     }
-                }
-                Rook => {
-                    for pos_iter in &pos_iter.axes() {
-                        line(self, p.c, map, *pos_iter);
-                    }
-                }
-                Bishop => {
-                    for pos_iter in &pos_iter.diagonals() {
-                        line(self, p.c, map, *pos_iter);
-                    }
-                }
-                Queen => {
-                    for pos_iter in &pos_iter.axes() {
-                        line(self, p.c, map, *pos_iter);
-                    }
-                    for pos_iter in &pos_iter.diagonals() {
-                        line(self, p.c, map, *pos_iter);
-                    }
-                }
-                Knight => {
-                    for pos_iter in &pos_iter.north().north().est().radials() {
-                        line(self, p.c, map, pos_iter.take(1));
-                    }
-                    for pos_iter in &pos_iter.north().north().west().radials() {
-                        line(self, p.c, map, pos_iter.take(1));
-                    }
-                }
-            }
-        }
-    }
-    fn reachable_by_player(self: &Game, player: Color, map: &mut [[bool; 8]; 8]) {
-        for (x, y, piece) in self.pieces_iter() {
+				}
+				King => {
+					for pos_iter in &PosIter::new(x, y).axes() {
+						self.reachable_by_pos_iter(pos_iter.take(1), piece.c, map)
+					}
+					for pos_iter in &PosIter::new(x, y).diagonals() {
+						self.reachable_by_pos_iter(pos_iter.take(1), piece.c, map)
+					}
+				}
+				Rook => {
+					for pos_iter in &PosIter::new(x, y).axes() {
+						self.reachable_by_pos_iter(*pos_iter, piece.c, map)
+					}
+				}
+				Bishop => {
+					for pos_iter in &PosIter::new(x, y).diagonals() {
+						self.reachable_by_pos_iter(*pos_iter, piece.c, map)
+					}
+				}
+				Queen => {
+					for pos_iter in &PosIter::new(x, y).axes() {
+						self.reachable_by_pos_iter(*pos_iter, piece.c, map)
+					}
+					for pos_iter in &PosIter::new(x, y).diagonals() {
+						self.reachable_by_pos_iter(*pos_iter, piece.c, map)
+					}
+				}
+			}
+		}
+	}
+	fn reachable_by_player(&self, player: Color, map: &mut [[bool; 8]; 8]) {
+        for (x, y, piece) in self.pieces() {
             if piece.c == player {
                 self.reachable_by_piece(x, y, map);
             }
         }
-    }
-    fn is_in_check(self: &Game, player: Color) -> bool {
-        let mut map = [[false; 8]; 8];
-        self.reachable_by_player(player.oponent(), &mut map);
-        for (x, y, piece) in self.pieces_iter() {
-            if piece.c == player && piece.t == King {
-                if map[y][x] {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    fn move_piece(self: &mut Game, m: Move) -> Option<Piece> {
+	}
+    fn is_in_check(&self, player: Color) -> bool {
+		let mut map = [[false; 8]; 8];
+		let oponent = match player {Black=>White, White=>Black};
+        self.reachable_by_player(oponent, &mut map);
+        self.pieces().any(|(x, y, p)| map[y][x] && p.c == player && p.t == King)
+	}
+    fn move_piece(&mut self, m: Move) -> Option<Piece> {
         if let Some(piece) = self.board[m.src_y][m.src_x].take() {
             self.board[m.dst_y][m.dst_x].replace(piece)
         }
         else {None}
-    }
-    fn play_move(self: &mut Game, m: Move, player: Color) -> Result<(), String> {
+	}
+	fn play_move(&mut self, m: Move, player: Color) -> bool {
         if let Some(piece) = self.board[m.src_y][m.src_x] {
             if piece.c == player {
                 let mut map = [[false; 8]; 8];
@@ -250,24 +207,42 @@ impl Game {
                     projection.move_piece(m);
                     if !projection.is_in_check(player) {
                         self.move_piece(m);
-                        Ok(())
+                        return true
                     }
-                    else {
-                        Err(String::from("that would put you in check"))
-                    }
-                }
-                else {
-                    // DEBUG
-                    self.print_with_reachable(&map);
-                    Err(String::from("this square is not reachable"))
                 }
             }
-            else {
-                Err(String::from("this piece does not belong to you"))
+		}
+		false
+    }
+    fn pieces(&self) -> BoardIter {
+        BoardIter{
+            board: &self.board,
+            x: 0, y: 0,
+        }
+    }
+    fn possible_piece_moves(&self, x: usize, y: usize, moves: &mut Vec<Move>) {
+        if let Some(piece) = self.board[y][x] {
+            let mut map = [[false; 8]; 8];
+            self.reachable_by_piece(x, y, &mut map);
+            for dst_y in 0..8 {
+                for dst_x in 0..8 {
+                    if map[dst_y][dst_x] {
+                        let mut predict = self.clone();
+                        let m = Move{src_x: x, src_y: y, dst_x, dst_y};
+                        predict.move_piece(m);
+                        if !predict.is_in_check(piece.c) {
+                            moves.push(m);
+                        }
+                    }
+                }
             }
         }
-        else {
-            Err(String::from("no piece selected"))
+    }
+    fn possible_player_moves(&self, player: Color, moves: &mut Vec<Move>) {
+        for (x, y, piece) in self.pieces() {
+            if piece.c == player {
+                self.possible_piece_moves(x, y, moves);
+            }
         }
     }
 }
@@ -276,97 +251,26 @@ struct BoardIter<'a> {
     board: &'a [[Option<Piece>; 8]; 8],
     x: usize,
     y: usize,
-    alive: bool,
-}
-impl<'a> Iterator for BoardIter<'a> {
-    type Item = (usize, usize, Piece);
-    fn next(self: &mut Self) -> Option<Self::Item> {
-        while self.alive {
-            let mut result = None;
-            if let Some(p) = self.board[self.y][self.x] {
-                result = Some((self.x, self.y, p));
-            }
-            if self.x < 8 {
-                self.x += 1;
-            }
-            if self.x == 8 {
-                self.x = 0;
-                self.y += 1;
-            }
-            if self.y == 8 {
-                self.alive = false;
-            }
-            if result.is_some() {
-                return result;
-            }
-        }
-        None
-    }
 }
 
-#[derive(Clone, Copy)]
-struct PosIter {
-    x: usize,
-    y: usize,
-    dx: isize,
-    dy: isize,
-}
-impl PosIter {
-    fn new(x: usize, y: usize) -> PosIter {
-        PosIter {x, y, dx: 0, dy: 0}
-    }
-	fn north(self: &PosIter) -> PosIter {
-		PosIter{ dy: self.dy - 1, .. *self}
-	}
-	fn south(self: &PosIter) -> PosIter {
-		PosIter{ dy: self.dy + 1, .. *self}
-	}
-	fn west(self: &PosIter) -> PosIter {
-		PosIter{ dx: self.dx - 1, .. *self}
-	}
-	fn est(self: &PosIter) -> PosIter {
-		PosIter{ dx: self.dx + 1, .. *self}
-	}
-	fn axes(self: &PosIter) -> [PosIter; 4] {
-        [
-            self.north(),
-            self.est(),
-            self.south(),
-            self.west(),
-        ]
-    }
-    fn diagonals(self: &PosIter) -> [PosIter; 4] {
-        [
-            self.north().est(),
-            self.est().south(),
-            self.south().west(),
-            self.west().north(),
-        ]
-	}
-    fn radials(self: &PosIter) -> [PosIter; 4] {
-        assert!(self.dx != 0 || self.dy != 0);
-        [
-            PosIter{dx:  self.dx, dy:  self.dy, .. *self},
-            PosIter{dx: -self.dy, dy:  self.dx, .. *self},
-            PosIter{dx: -self.dx, dy: -self.dy, .. *self},
-            PosIter{dx:  self.dy, dy: -self.dx, .. *self},
-        ]
-    }
-}
-impl Iterator for PosIter {
-    type Item = (usize, usize);
-    fn next(self: &mut PosIter) -> Option<(usize, usize)> {
-        if self.dx == 0 && self.dy == 0 {
-            return None
+impl<'a> Iterator for BoardIter<'a> {
+    type Item = (usize, usize, Piece);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.y == 8 {
+                return None
+            }
+            let (x, y) = (self.x, self.y);
+            self.x += 1;
+            if self.x == 8 {
+                self.y += 1;
+                self.x = 0;
+            }    
+            if let Some(p) = self.board[y][x] {
+                return Some((x, y, p))
+            }
         }
-        let res_x = self.x as isize + self.dx;
-        let res_y = self.y as isize + self.dy;
-        if (0..8).contains(&res_x) && (0..8).contains(&res_y) {
-            self.x = res_x as usize;
-            self.y = res_y as usize;
-            Some((self.x, self.y))
-        }
-        else {None}
     }
 }
 
@@ -415,23 +319,99 @@ fn get_user_move() -> Option<Move> {
 	})
 }
 
-fn main() {
-    let mut g = Game::new();
-    loop {
-        println!("** WHITE PLAYER **");
-        let mut map = [[false; 8]; 8];
-        g.reachable_by_player(White, &mut map);
-        g.print_with_reachable(&map);
-        while let Err(msg) = g.play_move(get_user_move_loop(), White) {
-            println!("{}", msg);
+#[derive(Clone, Copy)]
+struct PosIter {
+    x: usize,
+    y: usize,
+    dx: isize,
+    dy: isize,
+}
+impl PosIter {
+    fn new(x: usize, y: usize) -> Self {
+        Self {x, y, dx: 0, dy: 0}
+    }
+	fn north(&self) -> Self {
+		Self{ dy: self.dy - 1, .. *self}
+	}
+	fn south(&self) -> Self {
+		Self{ dy: self.dy + 1, .. *self}
+	}
+	fn west(&self) -> Self {
+		Self{ dx: self.dx - 1, .. *self}
+	}
+	fn est(&self) -> Self {
+		Self{ dx: self.dx + 1, .. *self}
+	}
+	fn axes(&self) -> [Self; 4] {
+        [
+            self.north(),
+            self.est(),
+            self.south(),
+            self.west(),
+        ]
+    }
+    fn diagonals(&self) -> [Self; 4] {
+        [
+            self.north().est(),
+            self.est().south(),
+            self.south().west(),
+            self.west().north(),
+        ]
+	}
+    fn radials(&self) -> [Self; 4] {
+        assert!(self.dx != 0 || self.dy != 0);
+        [
+            Self{dx:  self.dx, dy:  self.dy, .. *self},
+            Self{dx: -self.dy, dy:  self.dx, .. *self},
+            Self{dx: -self.dx, dy: -self.dy, .. *self},
+            Self{dx:  self.dy, dy: -self.dx, .. *self},
+        ]
+    }
+}
+impl Iterator for PosIter {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<(usize, usize)> {
+        if self.dx == 0 && self.dy == 0 {
+            return None
         }
 
-        println!("** BLACK PLAYER **");
-        let mut map = [[false; 8]; 8];
-        g.reachable_by_player(Black, &mut map);
-        g.print_with_reachable(&map);
-        while let Err(msg) = g.play_move(get_user_move_loop(), Black) {
-            println!("{}", msg);
+        let res_x = self.x as isize + self.dx;
+        let res_y = self.y as isize + self.dy;        
+        if (0..8).contains(&res_x) && (0..8).contains(&res_y) {
+            self.x = res_x as usize;
+            self.y = res_y as usize;
+            Some((self.x, self.y))
         }
+        else {
+            None
+        }
+    }
+}
+
+fn main() {
+    let mut game = Game::new();
+    let mut possible_moves = Vec::new();
+
+	for &player in [White, Black].iter().cycle() {
+		game.print();
+        println!("{:?} player", player);
+        
+        game.possible_player_moves(player, &mut possible_moves);
+        match (game.is_in_check(player), possible_moves.is_empty()) {
+            ( true,  true) => {println!("CHECKMATE!"); break},
+            ( true, false) => println!("IN CHECK!"),
+            (false,  true) => {println!("STALEMATE!"); break},
+            (false, false) => (),
+        }
+        possible_moves.clear();
+
+		loop {
+			let m = get_user_move_loop();
+			if game.play_move(m, player) {
+				break
+			}
+			println!("this is not a valid move");
+		}
     }
 }
