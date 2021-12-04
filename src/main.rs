@@ -16,7 +16,7 @@ fn main() {
     // let mut possible_moves = Vec::new();
 
     loop {
-        game.print();
+        game.print(chess::Color::White);
         // game.possible_player_moves(game.player, &mut possible_moves);
         // match (game.is_in_check(game.player), possible_moves.is_empty()) {
         //     (true, true) => {
@@ -33,5 +33,11 @@ fn main() {
         // possible_moves.clear();
 
         while game.push_move(get_user_move_loop()).map_err(|e| println!("{}", e)).is_err() {}
+
+        game.print(chess::Color::White);
+
+        let ia_move = game.best_move().unwrap();
+
+        game.push_move(ia_move).unwrap();
     }
 }

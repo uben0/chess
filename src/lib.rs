@@ -1,3 +1,6 @@
+use arrayvec::ArrayVec;
+use std::cmp::Ordering;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PieceType {
     King,
@@ -30,7 +33,7 @@ pub enum Color {
     White,
 }
 impl Color {
-    pub fn oponent(self) -> Self {
+    pub fn opponant(self) -> Self {
         match self {
             Self::White => Self::Black,
             Self::Black => Self::White,
@@ -166,7 +169,7 @@ impl<T> std::ops::IndexMut<Position> for [[T; 8]; 8] {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayMoveErr {
     NoPieceAtPosition,
-    CantMoveOponantPiece,
+    CantMoveOpponantPiece,
     SquareUnreachable,
     WouldBeInCheck,
 }
@@ -177,7 +180,7 @@ impl std::fmt::Display for PlayMoveErr {
             "{}",
             match self {
                 Self::NoPieceAtPosition => "no piece to move at given position",
-                Self::CantMoveOponantPiece => "cannot move oponant piece",
+                Self::CantMoveOpponantPiece => "cannot move opponant piece",
                 Self::SquareUnreachable => "not reachable by piece",
                 Self::WouldBeInCheck => "would be in check",
             }
@@ -185,12 +188,53 @@ impl std::fmt::Display for PlayMoveErr {
     }
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq)]
-// enum Exploration {
-//     Win,
-//     Loose,
-//     Heuristic(f64),
-// }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Exploration {
+    Win,
+    Loose,
+    StaleMate,
+    Heuristic(i32),
+}
+impl Exploration {
+    fn opponant(self) -> Self {
+        match self {
+            Self::Win => Self::Loose,
+            Self::Loose => Self::Win,
+            Self::StaleMate => Self::StaleMate,
+            Self::Heuristic(value) => Self::Heuristic(-value),
+        }
+    }
+}
+impl Ord for Exploration {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self {
+            Self::Win => match other {
+                Self::Win => Ordering::Equal,
+                _ => Ordering::Greater,
+            },
+            Self::Loose => match other {
+                Self::Loose => Ordering::Equal,
+                _ => Ordering::Less,
+            },
+            Self::StaleMate => match other {
+                Self::Loose => Ordering::Greater,
+                Self::StaleMate => Ordering::Equal,
+                _ => Ordering::Less,
+            },
+            Self::Heuristic(value) => match other {
+                Self::Win => Ordering::Less,
+                Self::Loose => Ordering::Greater,
+                Self::StaleMate => Ordering::Greater,
+                Self::Heuristic(other) => value.cmp(other),
+            },
+        }
+    }
+}
+impl PartialOrd for Exploration {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Game {
     pub fn new() -> Self {
@@ -199,7 +243,7 @@ impl Game {
     pub fn push_move(&mut self, m: Move) -> Result<(), PlayMoveErr> {
         let piece = self[m.src].ok_or(PlayMoveErr::NoPieceAtPosition)?;
         if piece.c != self.turn {
-            return Err(PlayMoveErr::CantMoveOponantPiece);
+            return Err(PlayMoveErr::CantMoveOpponantPiece);
         }
         let mut reachable = false;
         self.reach_by_piece(m.src, |pos| {
@@ -207,7 +251,7 @@ impl Game {
                 reachable = true
             }
         });
-        if reachable {
+        if !reachable {
             return Err(PlayMoveErr::SquareUnreachable);
         }
         let piece = self.board[m.src].take().unwrap();
@@ -217,7 +261,7 @@ impl Game {
             self.board[m.src] = Some(piece);
             return Err(PlayMoveErr::WouldBeInCheck);
         }
-        self.turn = self.turn.oponent();
+        self.turn = self.turn.opponant();
         self.moves.push((m, removed));
         Ok(())
     }
@@ -228,8 +272,12 @@ impl Game {
         let piece = self.board[m.dst].take();
         self.board[m.src] = piece;
         self.board[m.dst] = removed;
+        self.turn = self.turn.opponant();
     }
-    pub fn print(&self) {
+    pub fn print_turn(&self) {
+        self.print(self.turn);
+    }
+    pub fn print(&self, player: Color) {
         let square = |x: usize, y: usize| match self.board[y][x] {
             Some(piece) => {
                 print!("{} ", piece);
@@ -238,7 +286,7 @@ impl Game {
                 print!("\x1b[2m.\x1b[0m ");
             }
         };
-        match self.turn {
+        match player {
             Color::White => {
                 println!("  a b c d e f g h  ");
                 for y in (0..8).rev() {
@@ -263,36 +311,95 @@ impl Game {
             }
         }
     }
-    // fn best_move(&mut self) -> Option<Move> {
-    //     unimplemented!()
-    // }
-    // fn explore_moves(&mut self, depth: usize) -> Exploration {
-
-    //     for (pos, piece) in self.pieces().filter(|(_, p)| p.c == self.turn) {
-    //         let mut reachable = [[false; 8]; 8];
-    //         self.reachable_by_piece(pos, &mut reachable);
-    //     }
-    //     unimplemented!()
-    // }
-    // fn heuristic(&self) -> f64 {
-    //     self.pieces()
-    //         .map(|(pos, piece)| match piece.t {
-    //             PieceType::Pawn => {
-    //                 (match piece.c {
-    //                     Color::White => pos.y,
-    //                     Color::Black => 8 - pos.y,
-    //                 }) as f64
-    //                     * 0.1
-    //                     + 1.0
-    //             }
-    //             PieceType::Bishop => 3.0,
-    //             PieceType::Knight => 3.0,
-    //             PieceType::Rook => 5.0,
-    //             PieceType::Queen => 9.0,
-    //             PieceType::King => 0.0,
-    //         })
-    //         .sum()
-    // }
+    pub fn best_move(&mut self) -> Option<Move> {
+        let backup = self.clone();
+        let mut best = None;
+        let mut score = Exploration::StaleMate;
+        for src in BoardIter::new() {
+            if self[src].filter(|p| p.c == self.turn).is_some() {
+                let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                self.reach_by_piece(src, |dst| reachable.push(dst));
+                for dst in reachable {
+                    if self.push_move(Move { src, dst }).is_ok() {
+                        let result = self.explore_moves(2).opponant();
+                        if result > score {
+                            score = result;
+                            best = Some(Move { src, dst });
+                        }
+                        self.pop_move();
+                    }
+                }
+            }
+        }
+        assert_eq!(*self, backup);
+        best
+    }
+    fn explore_moves(&mut self, depth: usize) -> Exploration {
+        if depth == 0 {
+            let mut moves = 0;
+            for src in BoardIter::new() {
+                if self[src].filter(|p| p.c == self.turn).is_some() {
+                    let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                    self.reach_by_piece(src, |dst| reachable.push(dst));
+                    for dst in reachable {
+                        if self.push_move(Move { src, dst }).is_ok() {
+                            self.pop_move();
+                            moves += 1;
+                        }
+                    }
+                }
+            }
+            if moves == 0 {
+                if self.is_in_check() {
+                    Exploration::Loose
+                } else {
+                    Exploration::StaleMate
+                }
+            } else {
+                Exploration::Heuristic(self.heuristic())
+            }
+        } else {
+            let mut score = Exploration::StaleMate;
+            for src in BoardIter::new() {
+                if self[src].filter(|p| p.c == self.turn).is_some() {
+                    let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                    self.reach_by_piece(src, |dst| reachable.push(dst));
+                    for dst in reachable {
+                        if self.push_move(Move { src, dst }).is_ok() {
+                            score = score.max(self.explore_moves(depth - 1).opponant());
+                            self.pop_move();
+                        }
+                    }
+                }
+            }
+            score
+        }
+    }
+    pub fn heuristic(&self) -> i32 {
+        self.pieces()
+            .map(|(pos, piece)| {
+                let v = match piece.t {
+                    PieceType::Pawn => {
+                        (match piece.c {
+                            Color::White => pos.y,
+                            Color::Black => 8 - pos.y,
+                        }) as i32
+                            + 10
+                    }
+                    PieceType::Bishop => 30,
+                    PieceType::Knight => 30,
+                    PieceType::Rook => 50,
+                    PieceType::Queen => 90,
+                    PieceType::King => 0,
+                };
+                if piece.c == self.turn {
+                    v
+                } else {
+                    -v
+                }
+            })
+            .sum()
+    }
     fn reach_by_pos_iter<T: Iterator<Item = Position>>(
         &self,
         pos_iter: T,
@@ -315,8 +422,8 @@ impl Game {
             match piece.t {
                 PieceType::Pawn => {
                     let (pos_iter, start) = match piece.c {
-                        Color::Black => (pos.iter().north(), 6),
-                        Color::White => (pos.iter().south(), 1),
+                        Color::Black => (pos.iter().south(), 6),
+                        Color::White => (pos.iter().north(), 1),
                     };
                     for pos in pos_iter.take(if pos.y == start { 2 } else { 1 }) {
                         if self[pos].is_some() {
@@ -381,19 +488,84 @@ impl Game {
             self.reach_by_piece(pos, &mut map);
         }
     }
+    // fn threatening(&self, position: Position, mut map: impl FnMut(Position)) {
+    //     let piece = self[position].unwrap();
+    //     let opponant = piece.c.opponant();
+    //     // PAWN
+    //     let position_iter = match piece.c {
+    //         Color::White => position.iter().north(),
+    //         Color::Black => position.iter().south(),
+    //     };
+    //     if let Some(position) = position_iter.est().next() {
+    //         if let Some(dst_piece) = self[position] {
+    //             if dst_piece.c == opponant {
+    //                 map(position);
+    //             }
+    //         }
+    //     }
+    //     if let Some(position) = position_iter.west().next() {
+    //         if let Some(dst_piece) = self[position] {
+    //             if dst_piece.c == opponant {
+    //                 map(position);
+    //             }
+    //         }
+    //     }
+    //     let mut found_piece = |pos, piece| {
+    //         if self.board[pos] == Some(piece * opponant) {
+    //             map(pos)
+    //         }
+    //     };
+    //     // KNIGHT
+    //     for position_iter in position.iter().north().north().est().radials() {
+    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+    //             found_piece(pos, PieceType::Knight)
+    //         })
+    //     }
+    //     for position_iter in position.iter().north().north().west().radials() {
+    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+    //             found_piece(pos, PieceType::Knight)
+    //         })
+    //     }
+    //     // KING
+    //     for position_iter in position.iter().axes() {
+    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+    //             found_piece(pos, PieceType::King)
+    //         })
+    //     }
+    //     for position_iter in position.iter().diagonals() {
+    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+    //             found_piece(pos, PieceType::King)
+    //         })
+    //     }
+    //     // ROOK
+    //     for pos_iter in position.iter().axes() {
+    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Rook))
+    //     }
+    //     // BISHOP
+    //     for pos_iter in position.iter().diagonals() {
+    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Bishop))
+    //     }
+    //     // QUEEN
+    //     for pos_iter in position.iter().axes() {
+    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
+    //     }
+    //     for pos_iter in position.iter().diagonals() {
+    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
+    //     }
+    // }
     pub fn is_in_check(&self) -> bool {
         let mut in_check = false;
-        self.reach_by_player(self.turn.oponent(), |pos| {
+        self.reach_by_player(self.turn.opponant(), |pos| {
             if self[pos] == Some(PieceType::King * self.turn) {
                 in_check = true
             }
         });
         in_check
     }
-    fn pieces(&self) -> BoardIter {
-        BoardIter {
+    fn pieces(&self) -> PiecesIter {
+        PiecesIter {
             board: &self.board,
-            pos: Position { x: 0, y: 0 },
+            iter: Default::default(),
         }
     }
     // fn possible_piece_moves(&self, pos: Position, moves: &mut Vec<Move>) {
@@ -424,27 +596,46 @@ impl Game {
     // }
 }
 
-struct BoardIter<'a> {
-    board: &'a [[Option<Piece>; 8]; 8],
-    pos: Position,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+struct BoardIter {
+    y: usize,
+    x: usize,
+}
+impl BoardIter {
+    fn new() -> Self {
+        Default::default()
+    }
+}
+impl Iterator for BoardIter {
+    type Item = Position;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.y == 8 {
+            return None;
+        }
+        let (x, y) = (self.x, self.y);
+        self.x += 1;
+        if self.x == 8 {
+            self.y += 1;
+            self.x = 0;
+        }
+        Some(Position { x, y })
+    }
 }
 
-impl<'a> Iterator for BoardIter<'a> {
+struct PiecesIter<'a> {
+    board: &'a [[Option<Piece>; 8]; 8],
+    iter: BoardIter,
+}
+
+impl<'a> Iterator for PiecesIter<'a> {
     type Item = (Position, Piece);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.pos.y == 8 {
-                return None;
-            }
-            let pos = self.pos;
-            self.pos.x += 1;
-            if self.pos.x == 8 {
-                self.pos.y += 1;
-                self.pos.x = 0;
-            }
-            if let Some(p) = self.board[pos] {
-                return Some((pos, p));
+            let pos = self.iter.next()?;
+            if let Some(piece) = self.board[pos] {
+                return Some((pos, piece));
             }
         }
     }
@@ -483,13 +674,13 @@ impl PositionIter {
     }
     fn north(&self) -> Self {
         Self {
-            dy: self.dy - 1,
+            dy: self.dy + 1,
             ..*self
         }
     }
     fn south(&self) -> Self {
         Self {
-            dy: self.dy + 1,
+            dy: self.dy - 1,
             ..*self
         }
     }
