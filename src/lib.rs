@@ -111,7 +111,7 @@ impl std::str::FromStr for Position {
 pub struct Game {
     board: [[Option<Piece>; 8]; 8],
     turn: Color,
-    moves: Vec<(Move, Option<Piece>)>,
+    moves: Vec<(Move, Piece, Option<Piece>)>,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -205,34 +205,37 @@ impl Exploration {
         }
     }
 }
-impl Ord for Exploration {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match self {
-            Self::Win => match other {
-                Self::Win => Ordering::Equal,
-                _ => Ordering::Greater,
-            },
-            Self::Loose => match other {
-                Self::Loose => Ordering::Equal,
-                _ => Ordering::Less,
-            },
-            Self::StaleMate => match other {
-                Self::Loose => Ordering::Greater,
-                Self::StaleMate => Ordering::Equal,
-                _ => Ordering::Less,
-            },
-            Self::Heuristic(value) => match other {
-                Self::Win => Ordering::Less,
-                Self::Loose => Ordering::Greater,
-                Self::StaleMate => Ordering::Greater,
-                Self::Heuristic(other) => value.cmp(other),
-            },
-        }
-    }
-}
 impl PartialOrd for Exploration {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        enum Value {
+            Min,
+            Max,
+            Value(i32),
+        }
+        fn to_value(value: Exploration) -> Value {
+            match value {
+                Exploration::Win => Value::Max,
+                Exploration::Loose => Value::Min,
+                Exploration::Heuristic(value) => Value::Value(value),
+                Exploration::StaleMate => Value::Value(0),
+            }
+        }
+        let (lhs, rhs) = (to_value(*self), to_value(*other));
+        Some(match lhs {
+            Value::Max => match rhs {
+                Value::Max => Ordering::Equal,
+                _ => Ordering::Greater,
+            },
+            Value::Min => match rhs {
+                Value::Min => Ordering::Equal,
+                _ => Ordering::Less,
+            },
+            Value::Value(lhs) => match rhs {
+                Value::Max => Ordering::Less,
+                Value::Min => Ordering::Greater,
+                Value::Value(rhs) => lhs.cmp(&rhs),
+            },
+        })
     }
 }
 
@@ -261,16 +264,24 @@ impl Game {
             self.board[m.src] = Some(piece);
             return Err(PlayMoveErr::WouldBeInCheck);
         }
+        if piece.t == PieceType::Pawn {
+            let rank = match piece.c {
+                Color::White => 7,
+                Color::Black => 0,
+            };
+            if m.dst.y == rank {
+                self.board[m.dst] = Some(PieceType::Queen * piece.c);
+            }
+        }
         self.turn = self.turn.opponant();
-        self.moves.push((m, removed));
+        self.moves.push((m, piece, removed));
         Ok(())
     }
     pub fn pop_move(&mut self) {
-        let (m, removed) = self.moves.pop().unwrap();
+        let (m, moved, removed) = self.moves.pop().unwrap();
         assert!(self[m.dst].is_some());
         assert!(self[m.src].is_none());
-        let piece = self.board[m.dst].take();
-        self.board[m.src] = piece;
+        self.board[m.src] = Some(moved);
         self.board[m.dst] = removed;
         self.turn = self.turn.opponant();
     }
@@ -311,17 +322,62 @@ impl Game {
             }
         }
     }
-    pub fn best_move(&mut self) -> Option<Move> {
-        let backup = self.clone();
-        let mut best = None;
-        let mut score = Exploration::StaleMate;
+    pub fn count_available_moves(&mut self) -> usize {
+        let mut count = 0;
         for src in BoardIter::new() {
             if self[src].filter(|p| p.c == self.turn).is_some() {
                 let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
                 self.reach_by_piece(src, |dst| reachable.push(dst));
                 for dst in reachable {
                     if self.push_move(Move { src, dst }).is_ok() {
-                        let result = self.explore_moves(2).opponant();
+                        count += 1;
+                        self.pop_move();
+                    }
+                }
+            }
+        }
+        count
+    }
+    pub fn best_move(&mut self) -> Option<Move> {
+        fn print_progress_bar(count: usize, total: usize) {
+            fn log10(mut n: usize) -> usize {
+                let mut r = 0;
+                while n > 0 {
+                    r += 1;
+                    n /= 10;
+                }
+                r
+            }
+            use std::io::Write;
+
+            const LENGTH: usize = 20;
+            print!("\r\x1b[2K");
+            for i in 0..LENGTH {
+                print!("{}",
+                    match (i * 2).cmp(&(count * LENGTH * 2 / total)) {
+                        Ordering::Less => "━",
+                        Ordering::Equal => "╸",
+                        Ordering::Greater => " ",
+                    }                
+                );
+            }
+            print!("{: >padding$}/{}", count, total, padding = log10(total));
+            std::io::stdout().flush().unwrap();
+        }
+        let backup = self.clone();
+        let mut count = 0;
+        let total = self.count_available_moves();
+        let mut best = None;
+        let mut score = i32::MIN;
+        for src in BoardIter::new() {
+            if self[src].filter(|p| p.c == self.turn).is_some() {
+                let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                self.reach_by_piece(src, |dst| reachable.push(dst));
+                for dst in reachable {
+                    if self.push_move(Move { src, dst }).is_ok() {
+                        count += 1;
+                        print_progress_bar(count, total);
+                        let result = self.min_max(4, score);
                         if result > score {
                             score = result;
                             best = Some(Move { src, dst });
@@ -331,10 +387,11 @@ impl Game {
                 }
             }
         }
+        print!("\x1b[2K\r");
         assert_eq!(*self, backup);
         best
     }
-    fn explore_moves(&mut self, depth: usize) -> Exploration {
+    fn max_min(&mut self, depth: usize, roof: i32) -> i32 {
         if depth == 0 {
             let mut moves = 0;
             for src in BoardIter::new() {
@@ -351,28 +408,89 @@ impl Game {
             }
             if moves == 0 {
                 if self.is_in_check() {
-                    Exploration::Loose
+                    i32::MIN
                 } else {
-                    Exploration::StaleMate
+                    0
                 }
             } else {
-                Exploration::Heuristic(self.heuristic())
+                self.heuristic()
             }
         } else {
-            let mut score = Exploration::StaleMate;
+            let mut maximum = i32::MIN;
+            let mut stale_mate = true;
             for src in BoardIter::new() {
                 if self[src].filter(|p| p.c == self.turn).is_some() {
                     let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
                     self.reach_by_piece(src, |dst| reachable.push(dst));
                     for dst in reachable {
                         if self.push_move(Move { src, dst }).is_ok() {
-                            score = score.max(self.explore_moves(depth - 1).opponant());
+                            stale_mate = false;
+                            let result = self.min_max(depth - 1, maximum);
+                            maximum = maximum.max(result);
                             self.pop_move();
+                            if maximum >= roof {
+                                return maximum;
+                            }
                         }
                     }
                 }
             }
-            score
+            if stale_mate {
+                0
+            } else {
+                maximum
+            }
+        }
+    }
+    fn min_max(&mut self, depth: usize, floor: i32) -> i32 {
+        if depth == 0 {
+            let mut moves = 0;
+            for src in BoardIter::new() {
+                if self[src].filter(|p| p.c == self.turn).is_some() {
+                    let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                    self.reach_by_piece(src, |dst| reachable.push(dst));
+                    for dst in reachable {
+                        if self.push_move(Move { src, dst }).is_ok() {
+                            self.pop_move();
+                            moves += 1;
+                        }
+                    }
+                }
+            }
+            if moves == 0 {
+                if self.is_in_check() {
+                    i32::MAX
+                } else {
+                    0
+                }
+            } else {
+                -self.heuristic()
+            }
+        } else {
+            let mut minimum = i32::MAX;
+            let mut stale_mate = true;
+            for src in BoardIter::new() {
+                if self[src].filter(|p| p.c == self.turn).is_some() {
+                    let mut reachable = ArrayVec::<Position, { 4 * 7 }>::new();
+                    self.reach_by_piece(src, |dst| reachable.push(dst));
+                    for dst in reachable {
+                        if self.push_move(Move { src, dst }).is_ok() {
+                            stale_mate = false;
+                            let result = self.max_min(depth - 1, minimum);
+                            minimum = minimum.min(result);
+                            self.pop_move();
+                            if minimum <= floor {
+                                return minimum;
+                            }
+                        }
+                    }
+                }
+            }
+            if stale_mate {
+                0
+            } else {
+                minimum
+            }
         }
     }
     pub fn heuristic(&self) -> i32 {
