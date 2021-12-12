@@ -14,7 +14,6 @@ Moving a piece from A7 to A5 is done by typing `a7a5`.
 7 ♙ ♙ ♙     ♙ ♙ ♙  7
 8 ♖ ♘ ♗ ♕ ♔   ♘ ♖  8
   a b c d e f g h
-White player
-enter move:
-f7f6
+
+> f7f6
 ```

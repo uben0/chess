@@ -193,6 +193,9 @@ impl Game {
     pub fn new() -> Self {
         Default::default()
     }
+    pub fn moves_stack_len(&self) -> usize {
+        self.moves.len()
+    }
     pub fn push_move(&mut self, m: Move) -> Result<(), PlayMoveErr> {
         let piece = self[m.src].ok_or(PlayMoveErr::NoPieceAtPosition)?;
         if piece.c != self.turn {
@@ -227,13 +230,14 @@ impl Game {
         self.moves.push((m, piece, removed));
         Ok(())
     }
-    pub fn pop_move(&mut self) {
-        let (m, moved, removed) = self.moves.pop().unwrap();
+    pub fn pop_move(&mut self) -> Option<Move> {
+        let (m, moved, removed) = self.moves.pop()?;
         assert!(self[m.dst].is_some());
         assert!(self[m.src].is_none());
         self.board[m.src] = Some(moved);
         self.board[m.dst] = removed;
         self.turn = self.turn.opponant();
+        Some(m)
     }
     pub fn print_turn(&self) {
         self.print(self.turn);
@@ -291,11 +295,13 @@ impl Game {
     pub fn best_move_timed(&mut self, duration: std::time::Duration) -> Option<Move> {
         let start = std::time::Instant::now();
         let mut result = None;
-        let mut depth = 4;
+        let mut depth = 2;
         while start.elapsed() < duration {
             result = self.best_move(depth);
             depth += 1;
         }
+        // println!();
+        // println!("finding best move took {} ms", start.elapsed().as_millis());
         result
     }
     pub fn best_move(&mut self, n: usize) -> Option<Move> {
@@ -561,83 +567,80 @@ impl Game {
             }
         }
     }
-    fn reach_by_player(&self, player: Color, mut map: impl FnMut(Position)) {
-        for (pos, _) in self.pieces().filter(|(_, p)| p.c == player) {
-            self.reach_by_piece(pos, &mut map);
-        }
-    }
-    // fn threatening(&self, position: Position, mut map: impl FnMut(Position)) {
-    //     let piece = self[position].unwrap();
-    //     let opponant = piece.c.opponant();
-    //     // PAWN
-    //     let position_iter = match piece.c {
-    //         Color::White => position.iter().north(),
-    //         Color::Black => position.iter().south(),
-    //     };
-    //     if let Some(position) = position_iter.est().next() {
-    //         if let Some(dst_piece) = self[position] {
-    //             if dst_piece.c == opponant {
-    //                 map(position);
-    //             }
-    //         }
-    //     }
-    //     if let Some(position) = position_iter.west().next() {
-    //         if let Some(dst_piece) = self[position] {
-    //             if dst_piece.c == opponant {
-    //                 map(position);
-    //             }
-    //         }
-    //     }
-    //     let mut found_piece = |pos, piece| {
-    //         if self.board[pos] == Some(piece * opponant) {
-    //             map(pos)
-    //         }
-    //     };
-    //     // KNIGHT
-    //     for position_iter in position.iter().north().north().est().radials() {
-    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
-    //             found_piece(pos, PieceType::Knight)
-    //         })
-    //     }
-    //     for position_iter in position.iter().north().north().west().radials() {
-    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
-    //             found_piece(pos, PieceType::Knight)
-    //         })
-    //     }
-    //     // KING
-    //     for position_iter in position.iter().axes() {
-    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
-    //             found_piece(pos, PieceType::King)
-    //         })
-    //     }
-    //     for position_iter in position.iter().diagonals() {
-    //         self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
-    //             found_piece(pos, PieceType::King)
-    //         })
-    //     }
-    //     // ROOK
-    //     for pos_iter in position.iter().axes() {
-    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Rook))
-    //     }
-    //     // BISHOP
-    //     for pos_iter in position.iter().diagonals() {
-    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Bishop))
-    //     }
-    //     // QUEEN
-    //     for pos_iter in position.iter().axes() {
-    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
-    //     }
-    //     for pos_iter in position.iter().diagonals() {
-    //         self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
+    // fn reach_by_player(&self, player: Color, mut map: impl FnMut(Position)) {
+    //     for (pos, _) in self.pieces().filter(|(_, p)| p.c == player) {
+    //         self.reach_by_piece(pos, &mut map);
     //     }
     // }
-    pub fn is_in_check(&self) -> bool {
-        let mut in_check = false;
-        self.reach_by_player(self.turn.opponant(), |pos| {
-            if self[pos] == Some(PieceType::King * self.turn) {
-                in_check = true
+    fn threatening(&self, position: Position, mut map: impl FnMut(Position)) {
+        let piece = self[position].unwrap();
+        let opponant = piece.c.opponant();
+        // PAWN
+        let position_iter = match piece.c {
+            Color::White => position.iter().north(),
+            Color::Black => position.iter().south(),
+        };
+        if let Some(position) = position_iter.est().next() {
+            if let Some(dst_piece) = self[position] {
+                if dst_piece.c == opponant {
+                    map(position);
+                }
             }
-        });
+        }
+        if let Some(position) = position_iter.west().next() {
+            if let Some(dst_piece) = self[position] {
+                if dst_piece.c == opponant {
+                    map(position);
+                }
+            }
+        }
+        let mut found_piece = |pos, piece| {
+            if self.board[pos] == Some(piece * opponant) {
+                map(pos)
+            }
+        };
+        // KNIGHT
+        for position_iter in position.iter().north().north().est().radials() {
+            self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+                found_piece(pos, PieceType::Knight)
+            })
+        }
+        for position_iter in position.iter().north().north().west().radials() {
+            self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+                found_piece(pos, PieceType::Knight)
+            })
+        }
+        // KING
+        for position_iter in position.iter().axes() {
+            self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+                found_piece(pos, PieceType::King)
+            })
+        }
+        for position_iter in position.iter().diagonals() {
+            self.reach_by_pos_iter(position_iter.take(1), piece.c, |pos| {
+                found_piece(pos, PieceType::King)
+            })
+        }
+        // ROOK
+        for pos_iter in position.iter().axes() {
+            self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Rook))
+        }
+        // BISHOP
+        for pos_iter in position.iter().diagonals() {
+            self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Bishop))
+        }
+        // QUEEN
+        for pos_iter in position.iter().axes() {
+            self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
+        }
+        for pos_iter in position.iter().diagonals() {
+            self.reach_by_pos_iter(pos_iter, piece.c, |pos| found_piece(pos, PieceType::Queen))
+        }
+    }
+    pub fn is_in_check(&self) -> bool {
+        let (pos, _) = self.pieces().find(|(_, piece)| piece.t == PieceType::King).unwrap();
+        let mut in_check = false;
+        self.threatening(pos, |_| in_check = true);
         in_check
     }
     fn pieces(&self) -> PiecesIter {

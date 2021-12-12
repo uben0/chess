@@ -4,13 +4,16 @@ use structopt::StructOpt;
 #[derive(StructOpt)]
 #[structopt(name = "chess", about = "A chess game in the terminal.")]
 struct Opt {
-    /// Load a previously save game
+    /// Load a previously saved game
     file: Option<PathBuf>,
+    /// How smart the AI should be
+    #[structopt(short, long, default_value = "3")]
+    difficulty: u8,
 }
 
-const F_BOLD: &'static str = "\x1b[1m";
-const F_NONE: &'static str = "\x1b[0m";
-const F_EMPH: &'static str = "\x1b[1;93m";
+const F_BOLD: &str = "\x1b[1m";
+const F_NONE: &str = "\x1b[0m";
+const F_EMPH: &str = "\x1b[1;93m";
 
 fn prompt() {
     use std::io::Write;
@@ -21,7 +24,8 @@ fn prompt() {
 }
 
 fn main() {
-    let Opt { file } = Opt::from_args();
+    let Opt { file, difficulty } = Opt::from_args();
+    let difficulty = difficulty as u64 + 1;
     let mut game = match file {
         Some(file) => serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap(),
         None => chess::Game::new(),
@@ -69,9 +73,14 @@ fn main() {
                     println!("{}/auto{}    use AI to play next move", F_EMPH, F_NONE);
                 }
                 "/undo" => {
-                    game.pop_move();
-                    game.print(chess::Color::White);
-                    game.pop_move();
+                    if game.moves_stack_len() >= 2 {
+                        game.pop_move();
+                        game.print(chess::Color::White);
+                        game.pop_move();
+                    }
+                    else {
+                        println!("no moves to undo");
+                    }
                 }
                 "/show" => {
                     game.print(chess::Color::White);
@@ -79,13 +88,13 @@ fn main() {
                 "/auto" => {
                     game.print(chess::Color::White);
                     let ia_move = game
-                        .best_move_timed(std::time::Duration::from_secs(4))
+                        .best_move_timed(std::time::Duration::from_secs(difficulty))
                         .expect("no move available");
                     game.push_move(ia_move).unwrap();
                     println!();
                     game.print(chess::Color::White);
                     let ia_move = game
-                        .best_move_timed(std::time::Duration::from_secs(4))
+                        .best_move_timed(std::time::Duration::from_secs(difficulty))
                         .expect("no move available");
                     game.push_move(ia_move).unwrap();
                     println!();
@@ -102,7 +111,7 @@ fn main() {
                 Ok(Ok(())) => {
                     game.print(chess::Color::White);
                     let ia_move = game
-                        .best_move_timed(std::time::Duration::from_secs(4))
+                        .best_move_timed(std::time::Duration::from_secs(difficulty))
                         .expect("no move available");
                     game.push_move(ia_move).unwrap();
                     println!();
