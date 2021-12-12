@@ -1,7 +1,8 @@
 use arrayvec::ArrayVec;
 use std::cmp::Ordering;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PieceType {
     King,
     Queen,
@@ -27,7 +28,7 @@ impl std::fmt::Display for PieceType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Color {
     Black,
     White,
@@ -48,7 +49,7 @@ impl std::ops::Mul<Color> for PieceType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Piece {
     t: PieceType,
     c: Color,
@@ -63,7 +64,7 @@ impl std::fmt::Display for Piece {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Position {
     x: usize,
     y: usize,
@@ -107,7 +108,7 @@ impl std::str::FromStr for Position {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Game {
     board: [[Option<Piece>; 8]; 8],
     turn: Color,
@@ -185,57 +186,6 @@ impl std::fmt::Display for PlayMoveErr {
                 Self::WouldBeInCheck => "would be in check",
             }
         )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Exploration {
-    Win,
-    Loose,
-    StaleMate,
-    Heuristic(i32),
-}
-impl Exploration {
-    fn opponant(self) -> Self {
-        match self {
-            Self::Win => Self::Loose,
-            Self::Loose => Self::Win,
-            Self::StaleMate => Self::StaleMate,
-            Self::Heuristic(value) => Self::Heuristic(-value),
-        }
-    }
-}
-impl PartialOrd for Exploration {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        enum Value {
-            Min,
-            Max,
-            Value(i32),
-        }
-        fn to_value(value: Exploration) -> Value {
-            match value {
-                Exploration::Win => Value::Max,
-                Exploration::Loose => Value::Min,
-                Exploration::Heuristic(value) => Value::Value(value),
-                Exploration::StaleMate => Value::Value(0),
-            }
-        }
-        let (lhs, rhs) = (to_value(*self), to_value(*other));
-        Some(match lhs {
-            Value::Max => match rhs {
-                Value::Max => Ordering::Equal,
-                _ => Ordering::Greater,
-            },
-            Value::Min => match rhs {
-                Value::Min => Ordering::Equal,
-                _ => Ordering::Less,
-            },
-            Value::Value(lhs) => match rhs {
-                Value::Max => Ordering::Less,
-                Value::Min => Ordering::Greater,
-                Value::Value(rhs) => lhs.cmp(&rhs),
-            },
-        })
     }
 }
 
@@ -338,7 +288,17 @@ impl Game {
         }
         count
     }
-    pub fn best_move(&mut self) -> Option<Move> {
+    pub fn best_move_timed(&mut self, duration: std::time::Duration) -> Option<Move> {
+        let start = std::time::Instant::now();
+        let mut result = None;
+        let mut depth = 4;
+        while start.elapsed() < duration {
+            result = self.best_move(depth);
+            depth += 1;
+        }
+        result
+    }
+    pub fn best_move(&mut self, n: usize) -> Option<Move> {
         fn print_progress_bar(count: usize, total: usize) {
             fn log10(mut n: usize) -> usize {
                 let mut r = 0;
@@ -377,7 +337,7 @@ impl Game {
                     if self.push_move(Move { src, dst }).is_ok() {
                         count += 1;
                         print_progress_bar(count, total);
-                        let result = self.min_max(4, score);
+                        let result = self.min_max(n, score);
                         if result > score {
                             score = result;
                             best = Some(Move { src, dst });
@@ -759,7 +719,7 @@ impl<'a> Iterator for PiecesIter<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Move {
     pub src: Position,
     pub dst: Position,
