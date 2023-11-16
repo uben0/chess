@@ -1,6 +1,6 @@
 # Chess
 
-A chess board in the terminal that only accept valid moves.
+A chess board in the terminal that only accept valid moves. Also leveraging a home-made AI.
 
 Moving a piece from A7 to A5 is done by typing `a7a5`.
 ```
